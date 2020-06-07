@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import math
 
 
 class Conv2d(nn.Module):
@@ -30,7 +31,7 @@ class VGG16(nn.Module):
             Conv2d(128, 256, kernel_size=3, padding=1),
             Conv2d(256, 256, kernel_size=3, padding=1),
             Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.MaxPool2d(2),
+            nn.MaxPool2d(2, ceil_mode=True),
             Conv2d(256, 512, kernel_size=3, padding=1),
             Conv2d(512, 512, kernel_size=3, padding=1),
             Conv2d(512, 512, kernel_size=3, padding=1),
@@ -55,7 +56,7 @@ class AuxiliaryConv(nn.Module):
     def __init__(self):
         super(AuxiliaryConv, self).__init__()
         self.conv1 = nn.Sequential(
-            Conv2d(1024, 256, kernel_size=1, padding=1),
+            Conv2d(1024, 256, kernel_size=1),
             Conv2d(256, 512, kernel_size=3, stride=2, padding=1)
         )
         self.conv2 = nn.Sequential(
@@ -120,12 +121,59 @@ class PredictionConv(nn.Module):
         return locs, preds
 
 
+def get_priors():
+    feature_map_dimensions = {'conv4_3': 38,
+                              'conv7': 19,
+                              'conv8': 10,
+                              'conv9': 5,
+                              'conv10': 3,
+                              'conv11': 1}
+    prior_scales = {'conv4_3': 0.1,
+                    'conv7': 0.2,
+                    'conv8': 0.375,
+                    'conv9': 0.55,
+                    'conv10': 0.725,
+                    'conv11': 0.9}
+    aspect_ratios = {'conv4_3': [1, 2, 1 / 2],
+                     'conv7': [1, 2, 1 / 2, 3, 1 / 3],
+                     'conv8': [1, 2, 1 / 2, 3, 1 / 3],
+                     'conv9': [1, 2, 1 / 2, 3, 1 / 3],
+                     'conv10': [1, 2, 1 / 2],
+                     'conv11': [1, 2, 1 / 2]}
+
+    priors = []
+    feature_maps = list(feature_map_dimensions.keys())
+
+    for f, feature in enumerate(feature_maps):
+        feature_dimension = feature_map_dimensions[feature]
+        for i in range(feature_dimension):
+            for j in range(feature_dimension):
+                cx = (i+0.5)/feature_dimension
+                cy = (j+0.5)/feature_dimension
+                for ratio in aspect_ratios[feature]:
+                    w = prior_scales[feature] * math.sqrt(ratio)
+                    h = prior_scales[feature] / math.sqrt(ratio)
+                    priors.append([cx, cy, w, h])
+
+                    if ratio == 1:
+                        try:
+                            extra_prior = math.sqrt(
+                                prior_scales.get(feature_maps[f]) * prior_scales.get(feature_maps[f + 1]))
+                        except IndexError:
+                            extra_prior = 1
+                        priors.append([cx, cy, extra_prior, extra_prior])
+
+    priors = torch.FloatTensor(priors).clamp(0, 1)
+    return priors
+
+
 class SSD(nn.Module):
     def __init__(self, num_classes):
         super(SSD, self).__init__()
         self.vgg16 = VGG16()
         self.auxiliary_conv = AuxiliaryConv()
         self.prediction_conv = PredictionConv(num_classes)
+        self.priors = get_priors()
 
     def forward(self, x):
         out_4_3, out_7 = self.vgg16(x)
@@ -136,6 +184,6 @@ class SSD(nn.Module):
 
 
 if __name__ == '__main__':
-    i = torch.ones((2, 3, 300, 300))
+    img = torch.ones((2, 3, 300, 300))
     model = SSD(num_classes=90)
-    o = model(i)
+    o = model(img)

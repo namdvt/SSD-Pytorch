@@ -44,8 +44,11 @@ class CocoDataset(Dataset):
             labels.append(ann['category_id'] - 1)
             bboxes.append(torch.tensor(ann['bbox']).float())
 
-        image, labels, bboxes = transform(image, labels, torch.stack(bboxes))
-        show(image, labels, bboxes)
+        try:
+            image, labels, bboxes = transform(image, labels, torch.stack(bboxes))
+        except:
+            print()
+        # show(image, labels, bboxes)
         return image, labels, bboxes
 
 
@@ -70,7 +73,25 @@ def transform(image, labels, bboxes):
     image = F.resize(image, size=(300, 300))
     image = F.to_tensor(image)
 
+    labels = torch.LongTensor(labels)
+
     return image, labels, bboxes
+
+
+def get_dataloader(train_folder, train_anns, val_folder, val_anns, batch_size, size):
+    # training data
+    train_annotation = 'data/annotations/instances_val2017.json'
+    train_image_folder = 'data/val2017/'
+    train_coco_dataset = CocoDataset(anns=train_annotation, folder=train_image_folder, size=size)
+    train_loader = DataLoader(train_coco_dataset, batch_size=batch_size, collate_fn=collate, shuffle=True, drop_last=True)
+
+    # validation data
+    val_annotation = 'data/annotations/instances_val2017.json'
+    val_image_folder = 'data/val2017/'
+    val_coco_dataset = CocoDataset(anns=val_annotation, folder=val_image_folder, size=size)
+    val_loader = DataLoader(val_coco_dataset, batch_size=batch_size, collate_fn=collate, shuffle=True, drop_last=True)
+
+    return train_loader, val_loader
 
 
 if __name__ == '__main__':
@@ -82,4 +103,3 @@ if __name__ == '__main__':
     coco_dataloader = DataLoader(coco_dataset, batch_size=2, collate_fn=collate, shuffle=True, drop_last=True)
     for image, labels, bboxes in coco_dataloader:
         print()
-

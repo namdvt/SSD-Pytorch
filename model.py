@@ -1,6 +1,26 @@
 import torch
 import torch.nn as nn
 import math
+import torchvision.models
+from torch.utils import model_zoo
+
+model_urls = {
+    'vgg11': 'https://download.pytorch.org/models/vgg11-bbd30ac9.pth',
+    'vgg13': 'https://download.pytorch.org/models/vgg13-c768596a.pth',
+    'vgg16': 'https://download.pytorch.org/models/vgg16-397923af.pth',
+    'vgg19': 'https://download.pytorch.org/models/vgg19-dcbb9e9d.pth',
+    'vgg11_bn': 'https://download.pytorch.org/models/vgg11_bn-6002323d.pth',
+    'vgg13_bn': 'https://download.pytorch.org/models/vgg13_bn-abd245e5.pth',
+    'vgg16_bn': 'https://download.pytorch.org/models/vgg16_bn-6c64b313.pth',
+    'vgg19_bn': 'https://download.pytorch.org/models/vgg19_bn-c79401a0.pth',
+}
+
+cfgs = {
+    'A': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
+    'B': [64, 64, 'M', 128, 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
+    'D': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'MC', 512, 512, 512, 'M', 512, 512, 512, 'M'],
+    'E': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M'],
+}
 
 
 class Conv2d(nn.Module):
@@ -18,67 +38,124 @@ class Conv2d(nn.Module):
         return x
 
 
-class VGG16(nn.Module):
-    def __init__(self):
-        super(VGG16, self).__init__()
-        self.conv1 = nn.Sequential(
-            Conv2d(3, 64, kernel_size=3, padding=1),
-            Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.MaxPool2d(2),
-            Conv2d(64, 128, kernel_size=3, padding=1),
-            Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.MaxPool2d(2),
-            Conv2d(128, 256, kernel_size=3, padding=1),
-            Conv2d(256, 256, kernel_size=3, padding=1),
-            Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.MaxPool2d(2, ceil_mode=True),
-            Conv2d(256, 512, kernel_size=3, padding=1),
-            Conv2d(512, 512, kernel_size=3, padding=1),
-            Conv2d(512, 512, kernel_size=3, padding=1),
-        )
-        self.conv2 = nn.Sequential(
-            nn.MaxPool2d(2),
-            Conv2d(512, 512, kernel_size=3, padding=1),
-            Conv2d(512, 512, kernel_size=3, padding=1),
-            Conv2d(512, 512, kernel_size=3, padding=1),
-            Conv2d(512, 1024, kernel_size=3, padding=6, dilation=6),
-            Conv2d(1024, 1024, kernel_size=1)
-        )
+class VGG(nn.Module):
 
-    def forward(self, x):
-        out_4_3 = self.conv1(x)
-        out_7 = self.conv2(out_4_3)
+    def __init__(self, features, num_classes=1000, init_weights=True):
+        super(VGG, self).__init__()
+        self.features = features
+        self.conv4_3 = LayerActivation(self.features, 22)
+        self.conv5_3 = LayerActivation(self.features, 29)
+        self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
+        self.classifier = nn.Sequential(
+            nn.Linear(512 * 7 * 7, 4096),
+            nn.ReLU(True),
+            nn.Dropout(),
+            nn.Linear(4096, 4096),
+            nn.ReLU(True),
+            nn.Dropout(),
+            nn.Linear(4096, num_classes),
+        )
+        if init_weights:
+            self._initialize_weights()
 
-        return out_4_3, out_7
+    def forward(self, x, device):
+        self.features(x)
+        out4_3 = self.conv4_3.features.to(device)
+        out5_3 = self.conv5_3.features.to(device)
+        return out4_3, out5_3
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0)
+
+
+def make_layers(cfg, batch_norm=False):
+    layers = []
+    in_channels = 3
+    for v in cfg:
+        if v == 'M':
+            layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
+        elif v == 'MC':
+            layers += [nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=True)]
+        else:
+            conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
+            if batch_norm:
+                layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
+            else:
+                layers += [conv2d, nn.ReLU(inplace=True)]
+            in_channels = v
+    return nn.Sequential(*layers)
+
+
+def _vgg(arch, cfg, batch_norm, pretrained, **kwargs):
+    if pretrained:
+        kwargs['init_weights'] = False
+    model = VGG(make_layers(cfgs[cfg], batch_norm=batch_norm), **kwargs)
+    if pretrained:
+        state_dict = model_zoo.load_url(model_urls[arch])
+        model.load_state_dict(state_dict)
+    return model
+
+
+def vgg16(pretrained=False, **kwargs):
+    return _vgg('vgg16', 'D', False, pretrained, **kwargs)
+
+
+class LayerActivation:
+    features = None
+
+    def __init__(self, model, layer_num):
+        self.hook = model[layer_num].register_forward_hook(self.hook_fn)
+
+    def hook_fn(self, module, input, output):
+        self.features = output.cpu()
+
+    def remove(self):
+        self.hook.remove()
 
 
 class AuxiliaryConv(nn.Module):
     def __init__(self):
         super(AuxiliaryConv, self).__init__()
-        self.conv1 = nn.Sequential(
+        self.conv6_7 = nn.Sequential(
+            Conv2d(512, 1024, kernel_size=3, padding=6, dilation=6),
+            Conv2d(1024, 1024, kernel_size=1)
+        )
+
+        self.conv8 = nn.Sequential(
             Conv2d(1024, 256, kernel_size=1),
             Conv2d(256, 512, kernel_size=3, stride=2, padding=1)
         )
-        self.conv2 = nn.Sequential(
+        self.conv9 = nn.Sequential(
             Conv2d(512, 128, kernel_size=1),
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1)
         )
-        self.conv3 = nn.Sequential(
+        self.conv10 = nn.Sequential(
             Conv2d(256, 128, kernel_size=1),
             Conv2d(128, 256, kernel_size=3, stride=1)
         )
-        self.conv4 = nn.Sequential(
+        self.conv11 = nn.Sequential(
             Conv2d(256, 128, kernel_size=1),
             Conv2d(128, 256, kernel_size=3, stride=1)
         )
 
     def forward(self, x):
-        out1 = self.conv1(x)
-        out2 = self.conv2(out1)
-        out3 = self.conv3(out2)
-        out4 = self.conv4(out3)
+        out7 = self.conv6_7(x)
+        out8 = self.conv8(out7)
+        out9 = self.conv9(out8)
+        out10 = self.conv10(out9)
+        out11 = self.conv11(out10)
 
-        return out1, out2, out3, out4
+        return out7, out8, out9, out10, out11
 
 
 class PredictionLayerConv(nn.Module):
@@ -148,8 +225,8 @@ def get_priors():
         feature_dimension = feature_map_dimensions[feature]
         for i in range(feature_dimension):
             for j in range(feature_dimension):
-                cx = (i+0.5)/feature_dimension
-                cy = (j+0.5)/feature_dimension
+                cx = (i + 0.5) / feature_dimension
+                cy = (j + 0.5) / feature_dimension
                 for ratio in aspect_ratios[feature]:
                     w = prior_scales[feature] * math.sqrt(ratio)
                     h = prior_scales[feature] / math.sqrt(ratio)
@@ -168,22 +245,23 @@ def get_priors():
 
 
 class SSD(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, device):
         super(SSD, self).__init__()
-        self.vgg16 = VGG16()
-        self.auxiliary_conv = AuxiliaryConv()
-        self.prediction_conv = PredictionConv(num_classes)
+        self.device = device
+        self.vgg = vgg16(pretrained=True).to(device)
+        self.auxiliary_conv = AuxiliaryConv().to(device)
+        self.prediction_conv = PredictionConv(num_classes).to(device)
         self.priors = get_priors()
 
     def forward(self, x):
-        out_4_3, out_7 = self.vgg16(x)
-        out_8, out_9, out_10, out_11 = self.auxiliary_conv(out_7)
-        locs, preds = self.prediction_conv(out_4_3, out_7, out_8, out_9, out_10, out_11)
+        out4_3, out5_3 = self.vgg(x, self.device)
+        out7, out8, out9, out10, out11 = self.auxiliary_conv(out5_3)
+        locs, preds = self.prediction_conv(out4_3, out7, out8, out9, out10, out11)
 
         return locs, preds
 
 
 if __name__ == '__main__':
     img = torch.ones((2, 3, 300, 300))
-    model = SSD(num_classes=90)
+    model = SSD(num_classes=4)
     o = model(img)

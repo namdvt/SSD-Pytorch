@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import math
 
 
 def cal_IoU(boxes1, boxes2):
@@ -56,10 +57,9 @@ class MultiBoxLoss(nn.Module):
         true_locs = torch.zeros((batch_size, self.num_priors, 4), dtype=torch.float).to(self.device)
 
         for i in range(0, batch_size):
-            # n_objects = bboxes[i].size(0)
             n_objects = len(bboxes[i])
 
-            iou = cal_IoU(self.priors, bboxes[i])
+            iou = cal_IoU(self.priors, cxcy_to_xy(bboxes[i]))
             iou_for_each_prior, object_for_each_prior = iou.max(dim=1)
             _, prior_for_each_object = iou.max(dim=0)
 
@@ -71,7 +71,6 @@ class MultiBoxLoss(nn.Module):
             true_classes[i] = label_for_each_prior
             # true_locs[i] = cxcy_to_gcxgcy(xy_to_cxcywh(bboxes[i][object_for_each_prior]), self.priors_cxcy)
             true_locs[i] = cxcy_to_gcxgcy(bboxes[i][object_for_each_prior], self.priors_cxcy)
-            print()
 
         positive_priors = true_classes != 0
         # Localization loss

@@ -2,12 +2,13 @@ import torch
 import torch.optim as optim
 from helper import write_log, write_figure
 import numpy as np
-from dataset import get_dataloader
+from dataset import get_loader
 from model import SSD
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 from loss import MultiBoxLoss
+import math
 
 
 def fit(epoch, model, optimizer, criterion, device, data_loader, phase='training'):
@@ -28,8 +29,9 @@ def fit(epoch, model, optimizer, criterion, device, data_loader, phase='training
             with torch.no_grad():
                 pred_locs, pred_scores = model(image)
 
-        loss = criterion(pred_locs, pred_scores, [list(), list()], [list(), list()])
-        # loss = criterion(pred_locs, pred_scores, bboxes, labels)
+        loss = criterion(pred_locs, pred_scores, bboxes, labels)
+        if math.isnan(loss):
+            criterion(pred_locs, pred_scores, bboxes, labels)
         print(loss.item())
         running_loss += loss.item()
 
@@ -47,21 +49,16 @@ def train():
     batch_size = 2
     num_epochs = 200
     learning_rate = 0.1
-    size = 64
 
     device = torch.device("cuda:0" if (torch.cuda.is_available()) else "cpu")
-    model = SSD(num_classes=90).to(device)
+    model = SSD(num_classes=5, device=device)
     # model.load_state_dict(torch.load('output_3/weight.pth', map_location=device))
 
-    train_loader, val_loader = get_dataloader(train_folder='data/val2017/', val_folder='data/val2017/',
-                                              train_anns='data/annotations/instances_val2017.json',
-                                              val_anns='data/annotations/instances_val2017.json',
-                                              batch_size=batch_size,
-                                              size=size)
+    train_loader, val_loader = get_loader('data/African_Wildlife/train', batch_size=batch_size)
 
     optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, nesterov=True)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
-    criterion = MultiBoxLoss(priors=model.priors, device=device, num_classes=90)
+    criterion = MultiBoxLoss(priors=model.priors, device=device, num_classes=5)
 
     train_losses, val_losses = [], []
     for epoch in range(num_epochs):

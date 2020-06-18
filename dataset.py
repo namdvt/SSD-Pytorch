@@ -1,54 +1,37 @@
-from pycocotools.coco import COCO
 from PIL import Image
-import matplotlib.pyplot as plt
-import numpy as np
-from helper import show
 
+from helper import show, show2
 from torch.utils.data import Dataset, DataLoader, random_split
-import numpy as np
-import tifffile
 import torchvision.transforms.functional as F
-import cv2
-import torch.nn.functional as TF
 import torch
-import random
 
 
-class CocoDataset(Dataset):
-    def __init__(self, folder, anns, size):
-        super(CocoDataset, self).__init__()
-        self.data_folder = folder
-        self.size = size
-
-        self.coco = COCO(anns)
-        self.img_list = list(self.coco.imgs.keys())
-        self.category_ids = self.coco.getCatIds()
+class AfricanWildlifeDataset(Dataset):
+    def __init__(self, root):
+        super(AfricanWildlifeDataset, self).__init__()
+        self.root = root
+        self.image_list = open(root + '/annotations.txt').read().splitlines()
 
     def __len__(self):
-        return len(self.img_list)
+        return len(self.image_list)
 
     def __getitem__(self, index):
-        image_id = self.img_list[index]
-        image = Image.open(self.data_folder + self.coco.imgs.get(image_id).get('file_name'))
-
-        if image.layers != 3:
-            image = image.expand(3, image.width, image.height)
+        image, annotation = self.image_list[index].split('\t')
+        image = Image.open(image)
 
         labels = list()
         bboxes = list()
 
-        annotations_ids = self.coco.getAnnIds(imgIds=image_id, catIds=self.category_ids, iscrowd=None)
-        annotations = self.coco.loadAnns(annotations_ids)
+        annotation = open(annotation, 'r')
+        for line in annotation.readlines():
+            info = line.split()
+            label = int(line.split()[0]) + 1
+            bbox = [float(info[1]), float(info[2]), float(info[3]), float(info[4])]
 
-        for ann in annotations:
-            labels.append(ann['category_id'] - 1)
-            bboxes.append(torch.tensor(ann['bbox']).float())
+            labels.append(label)
+            bboxes.append(bbox)
 
-        try:
-            image, labels, bboxes = transform(image, labels, torch.stack(bboxes))
-        except:
-            print()
-        # show(image, labels, bboxes)
+        image, labels, bboxes = transform(image, labels, bboxes)
         return image, labels, bboxes
 
 
@@ -63,12 +46,12 @@ def collate(batch):
         bboxes.append(b[2])
 
     images = torch.stack(images)
+
     return images, labels, bboxes
 
 
 def transform(image, labels, bboxes):
-    ratio = 300 / torch.FloatTensor([image.width, image.height, image.width, image.height])
-    bboxes = torch.FloatTensor(bboxes) * ratio / 300
+    bboxes = torch.FloatTensor(bboxes)
 
     image = F.resize(image, size=(300, 300))
     image = F.to_tensor(image)
@@ -78,28 +61,21 @@ def transform(image, labels, bboxes):
     return image, labels, bboxes
 
 
-def get_dataloader(train_folder, train_anns, val_folder, val_anns, batch_size, size):
-    # training data
-    train_annotation = 'data/annotations/instances_val2017.json'
-    train_image_folder = 'data/val2017/'
-    train_coco_dataset = CocoDataset(anns=train_annotation, folder=train_image_folder, size=size)
-    train_loader = DataLoader(train_coco_dataset, batch_size=batch_size, collate_fn=collate, shuffle=True, drop_last=True)
+def get_loader(root, batch_size):
+    dataset = AfricanWildlifeDataset(root)
 
-    # validation data
-    val_annotation = 'data/annotations/instances_val2017.json'
-    val_image_folder = 'data/val2017/'
-    val_coco_dataset = CocoDataset(anns=val_annotation, folder=val_image_folder, size=size)
-    val_loader = DataLoader(val_coco_dataset, batch_size=batch_size, collate_fn=collate, shuffle=True, drop_last=True)
+    num_train = int(len(dataset) * 0.9)
+    num_val = len(dataset) - num_train
+    train_dataset, val_dataset = random_split(dataset, [num_train, num_val])
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=collate, shuffle=False, drop_last=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, collate_fn=collate, shuffle=True, drop_last=True)
 
     return train_loader, val_loader
 
 
 if __name__ == '__main__':
-    anns_file = 'data/annotations/instances_val2017.json'
-    data_folder = 'data/val2017/'
-    size = 300
-
-    coco_dataset = CocoDataset(anns=anns_file, folder=data_folder, size=size)
-    coco_dataloader = DataLoader(coco_dataset, batch_size=2, collate_fn=collate, shuffle=True, drop_last=True)
-    for image, labels, bboxes in coco_dataloader:
+    train, val = get_loader('data/African_Wildlife/train', batch_size=2)
+    for image, labels, bboxes in train:
         print()
+    print()

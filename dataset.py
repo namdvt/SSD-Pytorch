@@ -18,47 +18,35 @@ class AfricanWildlifeDataset(Dataset):
     def __getitem__(self, index):
         image, annotation = self.image_list[index].split('\t')
         image = Image.open(image)
+        image = F.resize(image, size=(250, 250))
+        image = F.to_tensor(image)
 
-        labels = list()
-        bboxes = list()
+        target = list()
 
         annotation = open(annotation, 'r')
         for line in annotation.readlines():
-            info = line.split()
-            label = int(line.split()[0]) + 1
-            bbox = [float(info[1]), float(info[2]), float(info[3]), float(info[4])]
+            obj = line.split()
+            obj = obj[1:] + [obj[0]]
+            obj = [torch.tensor(float(i)) for i in obj]
+            obj = torch.stack(obj)
 
-            labels.append(label)
-            bboxes.append(bbox)
+            target.append(obj)
+        target = torch.stack(target)
 
-        image, labels, bboxes = transform(image, labels, bboxes)
-        return image, labels, bboxes
+        return image, target
 
 
 def collate(batch):
     images = list()
-    labels = list()
-    bboxes = list()
+    targets = list()
 
     for b in batch:
         images.append(b[0])
-        labels.append(b[1])
-        bboxes.append(b[2])
+        targets.append(b[1])
 
     images = torch.stack(images)
 
-    return images, labels, bboxes
-
-
-def transform(image, labels, bboxes):
-    bboxes = torch.FloatTensor(bboxes)
-
-    image = F.resize(image, size=(300, 300))
-    image = F.to_tensor(image)
-
-    labels = torch.LongTensor(labels)
-
-    return image, labels, bboxes
+    return images, targets
 
 
 def get_loader(root, batch_size):
@@ -68,14 +56,14 @@ def get_loader(root, batch_size):
     num_val = len(dataset) - num_train
     train_dataset, val_dataset = random_split(dataset, [num_train, num_val])
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=collate, shuffle=False, drop_last=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=collate, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, collate_fn=collate, shuffle=True, drop_last=True)
 
     return train_loader, val_loader
 
 
 if __name__ == '__main__':
-    train, val = get_loader('data/African_Wildlife/train', batch_size=2)
-    for image, labels, bboxes in train:
+    train, val = get_loader('data/African_Wildlife/train', batch_size=8)
+    for images, targets in train:
         print()
     print()

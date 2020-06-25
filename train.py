@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 from loss import MultiBoxLoss
 import math
 
+from model2 import SSD7
+
 
 def fit(epoch, model, optimizer, criterion, device, data_loader, phase='training'):
     if phase == 'training':
@@ -19,46 +21,48 @@ def fit(epoch, model, optimizer, criterion, device, data_loader, phase='training
 
     running_loss = 0
 
-    for image, labels, bboxes in tqdm(data_loader):
-        image = image.to(device)
+    for images, targets in tqdm(data_loader):
+        images = images.to(device)
 
         if phase == 'training':
             optimizer.zero_grad()
-            pred_locs, pred_scores = model(image)
+            outputs = model(images)
         else:
             with torch.no_grad():
-                pred_locs, pred_scores = model(image)
+                outputs = model(images)
 
-        loss = criterion(pred_locs, pred_scores, bboxes, labels)
+        loss = criterion(outputs, targets)
         if math.isnan(loss):
-            criterion(pred_locs, pred_scores, bboxes, labels)
-        print(loss.item())
+            criterion(outputs, targets)
+        # print(loss.item())
         running_loss += loss.item()
 
         if phase == 'training':
             loss.backward()
             optimizer.step()
 
-    epoch_loss = running_loss / len(data_loader.dataset)
+    epoch_loss = running_loss / len(data_loader)
     print('[%d][%s] loss: %.4f' % (epoch, phase, epoch_loss))
     return epoch_loss
 
 
 def train():
     print('start training ...........')
-    batch_size = 2
+    batch_size = 4
     num_epochs = 200
     learning_rate = 0.1
 
     device = torch.device("cuda:0" if (torch.cuda.is_available()) else "cpu")
-    model = SSD(num_classes=5, device=device)
-    # model.load_state_dict(torch.load('output_3/weight.pth', map_location=device))
+    model = SSD7(num_classes=4+1).to(device)
+    # model.load_state_dict(torch.load('output/weight.pth', map_location=device))
 
-    train_loader, val_loader = get_loader('data/African_Wildlife/train', batch_size=batch_size)
+    train_loader, val_loader = get_loader('data/African_Wildlife/test', batch_size=batch_size)
 
     optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, nesterov=True)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
-    criterion = MultiBoxLoss(priors=model.priors, device=device, num_classes=5)
+    criterion = MultiBoxLoss(4 + 1, 0.5, True, 0, True, 3, 0.5,
+                             False, False)
+
 
     train_losses, val_losses = [], []
     for epoch in range(num_epochs):

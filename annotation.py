@@ -2,6 +2,7 @@ import glob
 import os
 import shutil
 import re
+import random
 
 
 def write_annotation(root, file):
@@ -14,6 +15,7 @@ def write_annotation(root, file):
 
 def split_train_test(root):
     files = glob.glob(root + '/*/*.jpg')
+    random.shuffle(files)
 
     for folder in ['/train', '/test']:
         if not os.path.exists(root + folder):
@@ -22,7 +24,7 @@ def split_train_test(root):
             if not os.path.exists(root + folder + sub_folder):
                 os.mkdir(root + folder + sub_folder)
 
-    index = int(len(files) * 0.8)
+    index = int(len(files) * 0.9)
     for file in files[0:index]:
         shutil.move(file, root + '/train' + file.split('data/African_Wildlife')[1])
         shutil.move(file.split('.')[0] + '.txt',

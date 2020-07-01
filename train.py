@@ -5,12 +5,8 @@ import numpy as np
 from dataset import get_loader
 from model import SSD
 from tqdm import tqdm
-from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
 from loss import MultiBoxLoss
 import math
-
-from model2 import SSD7
 
 
 def fit(epoch, model, optimizer, criterion, device, data_loader, phase='training'):
@@ -21,20 +17,17 @@ def fit(epoch, model, optimizer, criterion, device, data_loader, phase='training
 
     running_loss = 0
 
-    for images, targets in tqdm(data_loader):
-        images = images.to(device)
+    for image, labels, bboxes in tqdm(data_loader):
+        image = image.to(device)
 
         if phase == 'training':
             optimizer.zero_grad()
-            outputs = model(images)
+            pred_locs, pred_scores = model(image)
         else:
             with torch.no_grad():
-                outputs = model(images)
+                pred_locs, pred_scores = model(image)
 
-        loss = criterion(outputs, targets)
-        if math.isnan(loss):
-            criterion(outputs, targets)
-        # print(loss.item())
+        loss = criterion(pred_locs, pred_scores, bboxes, labels)
         running_loss += loss.item()
 
         if phase == 'training':
@@ -48,21 +41,19 @@ def fit(epoch, model, optimizer, criterion, device, data_loader, phase='training
 
 def train():
     print('start training ...........')
-    batch_size = 4
+    batch_size = 2
     num_epochs = 200
-    learning_rate = 0.1
+    learning_rate = 0.01
 
     device = torch.device("cuda:0" if (torch.cuda.is_available()) else "cpu")
-    model = SSD7(num_classes=4+1).to(device)
+    model = SSD(num_classes=5, device=device)
     # model.load_state_dict(torch.load('output/weight.pth', map_location=device))
 
-    train_loader, val_loader = get_loader('data/African_Wildlife/test', batch_size=batch_size)
+    train_loader, val_loader = get_loader('data/African_Wildlife', batch_size=batch_size)
 
     optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, nesterov=True)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
-    criterion = MultiBoxLoss(4 + 1, 0.5, True, 0, True, 3, 0.5,
-                             False, False)
-
+    criterion = MultiBoxLoss(priors=model.priors_cxcy)
 
     train_losses, val_losses = [], []
     for epoch in range(num_epochs):
@@ -70,7 +61,10 @@ def train():
         val_epoch_loss = fit(epoch, model, optimizer, criterion, device, val_loader, phase='validation')
         print('-----------------------------------------')
 
-        if epoch == 0 or val_epoch_loss <= np.min(val_losses):
+        # if epoch == 0 or val_epoch_loss <= np.min(val_losses):
+        #     torch.save(model.state_dict(), 'output/weight.pth')
+
+        if epoch == 0 or train_epoch_loss <= np.min(train_losses):
             torch.save(model.state_dict(), 'output/weight.pth')
 
         train_losses.append(train_epoch_loss)

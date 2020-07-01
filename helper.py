@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import torch
 
-African_wildlife_labels = {0: 'buffalo', 1: 'elephant', 2: 'rhino', 3: 'zebra'}
+African_wildlife_labels = {0: 'background', 1: 'buffalo', 2: 'elephant', 3: 'rhino', 4: 'zebra'}
 
 
 def show(image, labels, bboxes):
@@ -24,8 +24,8 @@ def show(image, labels, bboxes):
 
 
 def show2(image, labels, bboxes):
-    bboxes = bboxes * 250
-    plt.imshow(image.squeeze().permute(1, 2, 0))
+    bboxes = bboxes * 300
+    plt.imshow(image.permute(1, 2, 0))
     figure = plt.gca()
     for label, bbox in zip(labels, bboxes):
         rectangle = patches.Rectangle(xy=(bbox[0] - bbox[2]/2, bbox[1] - bbox[3]/2),

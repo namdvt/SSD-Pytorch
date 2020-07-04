@@ -2,7 +2,7 @@ import torch
 import torch.optim as optim
 from helper import write_log, write_figure
 import numpy as np
-from dataset import get_loader
+from dataset_voc import get_loader
 from model import SSD
 from tqdm import tqdm
 from loss import MultiBoxLoss
@@ -46,14 +46,14 @@ def train():
     learning_rate = 0.01
 
     device = torch.device("cuda:0" if (torch.cuda.is_available()) else "cpu")
-    model = SSD(num_classes=5, device=device)
+    model = SSD(num_classes=21, device=device)
     # model.load_state_dict(torch.load('output/weight.pth', map_location=device))
 
-    train_loader, val_loader = get_loader('data/African_Wildlife', batch_size=batch_size)
+    train_loader, val_loader = get_loader('data/VOC2012', batch_size=batch_size)
 
     optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, nesterov=True)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
-    criterion = MultiBoxLoss(priors=model.priors_cxcy)
+    criterion = MultiBoxLoss(priors=model.priors_cxcy, device=device)
 
     train_losses, val_losses = [], []
     for epoch in range(num_epochs):
@@ -61,11 +61,11 @@ def train():
         val_epoch_loss = fit(epoch, model, optimizer, criterion, device, val_loader, phase='validation')
         print('-----------------------------------------')
 
-        # if epoch == 0 or val_epoch_loss <= np.min(val_losses):
-        #     torch.save(model.state_dict(), 'output/weight.pth')
-
-        if epoch == 0 or train_epoch_loss <= np.min(train_losses):
+        if epoch == 0 or val_epoch_loss <= np.min(val_losses):
             torch.save(model.state_dict(), 'output/weight.pth')
+
+        # if epoch == 0 or train_epoch_loss <= np.min(train_losses):
+        #     torch.save(model.state_dict(), 'output/weight.pth')
 
         train_losses.append(train_epoch_loss)
         val_losses.append(val_epoch_loss)

@@ -8,7 +8,7 @@ from helper import African_wildlife_labels
 
 from model import SSD
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Transforms
 resize = transforms.Resize((300, 300))
@@ -33,8 +33,8 @@ def detect(original_image, min_score, max_overlap, top_k, suppress=None):
         [original_image.width, original_image.height, original_image.width, original_image.height]).unsqueeze(0)
     det_boxes = det_boxes * original_dims
 
-    if det_labels == ['background']:
-        return original_image
+    # if det_labels == ['background']:
+    #     return original_image
 
     # Annotate
     plt.imshow(original_image)
@@ -60,13 +60,13 @@ def detect(original_image, min_score, max_overlap, top_k, suppress=None):
 
 if __name__ == '__main__':
     # Load model checkpoint
-    device = torch.device("cuda:0" if (torch.cuda.is_available()) else "cpu")
-    model = SSD(num_classes=5, device=device)
+    device = torch.device("cpu")
+    model = SSD(num_classes=21, device=device)
     # model.load_state_dict(torch.load('output/weight.pth', map_location=device))
     model = model.to(device)
     model.eval()
 
-    img_path = 'data/African_Wildlife/test/elephant/286.jpg'
+    img_path = 'data/African_Wildlife/test/buffalo/001.jpg'
     original_image = Image.open(img_path)
 
-    detect(original_image, min_score=0.5, max_overlap=0.5, top_k=200)
+    detect(original_image, min_score=0.5, max_overlap=0.5, top_k=3)

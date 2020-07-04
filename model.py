@@ -7,6 +7,24 @@ import torch.nn.functional as F
 
 from loss import cxcy_to_xy, cal_IoU, gcxgcy_to_cxcy
 
+model_urls = {
+    'vgg11': 'https://download.pytorch.org/models/vgg11-bbd30ac9.pth',
+    'vgg13': 'https://download.pytorch.org/models/vgg13-c768596a.pth',
+    'vgg16': 'https://download.pytorch.org/models/vgg16-397923af.pth',
+    'vgg19': 'https://download.pytorch.org/models/vgg19-dcbb9e9d.pth',
+    'vgg11_bn': 'https://download.pytorch.org/models/vgg11_bn-6002323d.pth',
+    'vgg13_bn': 'https://download.pytorch.org/models/vgg13_bn-abd245e5.pth',
+    'vgg16_bn': 'https://download.pytorch.org/models/vgg16_bn-6c64b313.pth',
+    'vgg19_bn': 'https://download.pytorch.org/models/vgg19_bn-c79401a0.pth',
+}
+
+cfgs = {
+    'A': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
+    'B': [64, 64, 'M', 128, 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
+    'D': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'MC', 512, 512, 512, 'M', 512, 512, 512, 'M'],
+    'E': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M'],
+}
+
 
 class Conv2d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True, dilation=1):
@@ -20,7 +38,84 @@ class Conv2d(nn.Module):
         x = self.conv(x)
         x = self.bn(x)
         x = self.relu(x)
+        x = F.dropout2d(x, 0.3)
         return x
+
+
+class VGG(nn.Module):
+
+    def __init__(self, features, num_classes=1000, init_weights=True, freezed=True):
+        super(VGG, self).__init__()
+        self.features = features
+        self.conv4_3 = LayerActivation(self.features, 22)
+        self.conv5_3 = LayerActivation(self.features, 29)
+        self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
+        self.classifier = nn.Sequential(
+            nn.Linear(512 * 7 * 7, 4096),
+            nn.ReLU(True),
+            nn.Dropout(),
+            nn.Linear(4096, 4096),
+            nn.ReLU(True),
+            nn.Dropout(),
+            nn.Linear(4096, num_classes),
+        )
+        if init_weights:
+            self._initialize_weights()
+
+        if freezed:
+            for param in self.features.parameters():
+                param.requires_grad = False
+
+    def forward(self, x, device):
+        self.features(x)
+        out4_3 = self.conv4_3.features.to(device)
+        out5_3 = self.conv5_3.features.to(device)
+        return out4_3, out5_3
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0)
+
+
+def make_layers(cfg, batch_norm=False):
+    layers = []
+    in_channels = 3
+    for v in cfg:
+        if v == 'M':
+            layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
+        elif v == 'MC':
+            layers += [nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=True)]
+        else:
+            conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
+            if batch_norm:
+                layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
+            else:
+                layers += [conv2d, nn.ReLU(inplace=True)]
+            in_channels = v
+    return nn.Sequential(*layers)
+
+
+def _vgg(arch, cfg, batch_norm, pretrained, **kwargs):
+    if pretrained:
+        kwargs['init_weights'] = False
+    model = VGG(make_layers(cfgs[cfg], batch_norm=batch_norm), **kwargs)
+    if pretrained:
+        state_dict = model_zoo.load_url(model_urls[arch])
+        model.load_state_dict(state_dict)
+    return model
+
+
+def vgg16(pretrained=False, **kwargs):
+    return _vgg('vgg16', 'D', False, pretrained, **kwargs)
 
 
 class LayerActivation:
@@ -112,149 +207,88 @@ class PredictionConv(nn.Module):
 
 
 def get_priors():
-    feature_map_dimensions = {'conv4_3': 38,
-                              'conv7': 19,
-                              'conv8': 10,
-                              'conv9': 5,
-                              'conv10': 3,
-                              'conv11': 1}
-    prior_scales = {'conv4_3': 0.1,
-                    'conv7': 0.2,
-                    'conv8': 0.375,
-                    'conv9': 0.55,
-                    'conv10': 0.725,
-                    'conv11': 0.9}
-    aspect_ratios = {'conv4_3': [1, 2, 1 / 2],
-                     'conv7': [1, 2, 1 / 2, 3, 1 / 3],
-                     'conv8': [1, 2, 1 / 2, 3, 1 / 3],
-                     'conv9': [1, 2, 1 / 2, 3, 1 / 3],
-                     'conv10': [1, 2, 1 / 2],
-                     'conv11': [1, 2, 1 / 2]}
+    fmap_dims = {'conv4_3': 38,
+                 'conv7': 19,
+                 'conv8_2': 10,
+                 'conv9_2': 5,
+                 'conv10_2': 3,
+                 'conv11_2': 1}
 
-    priors = []
-    feature_maps = list(feature_map_dimensions.keys())
+    obj_scales = {'conv4_3': 0.1,
+                  'conv7': 0.2,
+                  'conv8_2': 0.375,
+                  'conv9_2': 0.55,
+                  'conv10_2': 0.725,
+                  'conv11_2': 0.9}
 
-    for f, feature in enumerate(feature_maps):
-        feature_dimension = feature_map_dimensions[feature]
-        for i in range(feature_dimension):
-            for j in range(feature_dimension):
-                cx = (i + 0.5) / feature_dimension
-                cy = (j + 0.5) / feature_dimension
-                for ratio in aspect_ratios[feature]:
-                    w = prior_scales[feature] * math.sqrt(ratio)
-                    h = prior_scales[feature] / math.sqrt(ratio)
-                    priors.append([cx, cy, w, h])
+    aspect_ratios = {'conv4_3': [1., 2., 0.5],
+                     'conv7': [1., 2., 3., 0.5, .333],
+                     'conv8_2': [1., 2., 3., 0.5, .333],
+                     'conv9_2': [1., 2., 3., 0.5, .333],
+                     'conv10_2': [1., 2., 0.5],
+                     'conv11_2': [1., 2., 0.5]}
 
-                    if ratio == 1:
+    fmaps = list(fmap_dims.keys())
+
+    prior_boxes = []
+
+    for k, fmap in enumerate(fmaps):
+        for i in range(fmap_dims[fmap]):
+            for j in range(fmap_dims[fmap]):
+                cx = (j + 0.5) / fmap_dims[fmap]
+                cy = (i + 0.5) / fmap_dims[fmap]
+
+                for ratio in aspect_ratios[fmap]:
+                    prior_boxes.append(
+                        [cx, cy, obj_scales[fmap] * math.sqrt(ratio), obj_scales[fmap] / math.sqrt(ratio)])
+                    if ratio == 1.:
                         try:
-                            extra_prior = math.sqrt(
-                                prior_scales.get(feature_maps[f]) * prior_scales.get(feature_maps[f + 1]))
+                            additional_scale = math.sqrt(obj_scales[fmap] * obj_scales[fmaps[k + 1]])
                         except IndexError:
-                            extra_prior = 1
-                        priors.append([cx, cy, extra_prior, extra_prior])
+                            additional_scale = 1.
+                        prior_boxes.append([cx, cy, additional_scale, additional_scale])
 
-    priors = torch.FloatTensor(priors).clamp(0, 1)
-    return priors
+    prior_boxes = torch.FloatTensor(prior_boxes)
+    prior_boxes.clamp_(0, 1)
 
-
-class VGG(nn.Module):
-    def __init__(self, pretrained=False, freezed=False):
-        super(VGG, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
-            nn.Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
-            nn.Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=True),
-            nn.Conv2d(256, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
-            nn.Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
-        )
-        self.conv4_3 = LayerActivation(self.features, 22)
-        self.conv5_3 = LayerActivation(self.features, 29)
-
-        if pretrained:
-            self._load_pretrained_weight()
-        else:
-            self._initialize_weights()
-
-        if freezed:
-            for param in self.features.parameters():
-                param.requires_grad = False
-
-    def _load_pretrained_weight(self):
-        pretrained_dict = model_zoo.load_url('https://download.pytorch.org/models/vgg16-397923af.pth')
-        model_dict = self.state_dict()
-
-        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-        model_dict.update(pretrained_dict)
-        self.load_state_dict(model_dict)
-
-    def _initialize_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, 0, 0.01)
-                nn.init.constant_(m.bias, 0)
-
-    def forward(self, x, device):
-        self.features(x)
-        out4_3 = self.conv4_3.features.to(device)
-        out5_3 = self.conv5_3.features.to(device)
-        return out4_3, out5_3
+    return prior_boxes
 
 
 class SSD(nn.Module):
     def __init__(self, num_classes, device):
         super(SSD, self).__init__()
-        self.VGG_ = VGG(pretrained=True, freezed=True)
         self.device = device
         self.num_classes = num_classes
+        self.vgg = vgg16(pretrained=True, freezed=True).to(device)
         self.auxiliary_conv = AuxiliaryConv().to(device)
         self.prediction_conv = PredictionConv(num_classes).to(device)
-        self.priors_cxcy = get_priors()
+        self.priors_cxcy = get_priors().to(device)
 
     def forward(self, x):
-        out4_3, out5_3 = self.VGG_(x, self.device)
+        out4_3, out5_3 = self.vgg(x, self.device)
         out7, out8, out9, out10, out11 = self.auxiliary_conv(out5_3)
         locs, preds = self.prediction_conv(out4_3, out7, out8, out9, out10, out11)
 
         return locs, preds
 
     def detect_objects(self, predicted_locs, predicted_scores, min_score, max_overlap, top_k):
+        """
+        Decipher the 8732 locations and class scores (output of ths SSD300) to detect objects.
+
+        For each class, perform Non-Maximum Suppression (NMS) on boxes that are above a minimum threshold.
+
+        :param predicted_locs: predicted locations/boxes w.r.t the 8732 prior boxes, a tensor of dimensions (N, 8732, 4)
+        :param predicted_scores: class scores for each of the encoded locations/boxes, a tensor of dimensions (N, 8732, n_classes)
+        :param min_score: minimum threshold for a box to be considered a match for a certain class
+        :param max_overlap: maximum overlap two boxes can have so that the one with the lower score is not suppressed via NMS
+        :param top_k: if there are a lot of resulting detection across all classes, keep only the top 'k'
+        :return: detections (boxes, labels, and scores), lists of length batch_size
+        """
         batch_size = predicted_locs.size(0)
         n_priors = self.priors_cxcy.size(0)
-        predicted_scores = F.softmax(predicted_scores, dim=2)  # (N, priors, n_classes)
+        predicted_scores = F.softmax(predicted_scores, dim=2)  # (N, 8732, n_classes)
 
+        # Lists to store final predicted boxes, labels, and scores for all images
         all_images_boxes = list()
         all_images_labels = list()
         all_images_scores = list()
@@ -264,22 +298,24 @@ class SSD(nn.Module):
         for i in range(batch_size):
             # Decode object coordinates from the form we regressed predicted boxes to
             decoded_locs = cxcy_to_xy(
-                gcxgcy_to_cxcy(predicted_locs[i], self.priors_cxcy))  # (priors, 4), these are fractional pt. coordinates
+                gcxgcy_to_cxcy(predicted_locs[i], self.priors_cxcy))  # (8732, 4), these are fractional pt. coordinates
 
             # Lists to store boxes and scores for this image
             image_boxes = list()
             image_labels = list()
             image_scores = list()
 
+            max_scores, best_label = predicted_scores[i].max(dim=1)  # (8732)
+
             # Check for each class
             for c in range(1, self.num_classes):
                 # Keep only predicted boxes and scores where scores for this class are above the minimum score
-                class_scores = predicted_scores[i][:, c]  # (priors)
+                class_scores = predicted_scores[i][:, c]  # (8732)
                 score_above_min_score = class_scores > min_score  # torch.uint8 (byte) tensor, for indexing
                 n_above_min_score = score_above_min_score.sum().item()
                 if n_above_min_score == 0:
                     continue
-                class_scores = class_scores[score_above_min_score]  # (n_qualified), n_min_score <= priors
+                class_scores = class_scores[score_above_min_score]  # (n_qualified), n_min_score <= 8732
                 class_decoded_locs = decoded_locs[score_above_min_score]  # (n_qualified, 4)
 
                 # Sort predicted boxes and scores by scores

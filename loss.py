@@ -17,12 +17,6 @@ def cal_intersection(boxes1, boxes2):
     return intersection_dims[:, :, 0] * intersection_dims[:, :, 1]
 
 
-def xy_to_cxcywh(xy):
-    cxcy = (xy[:, 2:] + xy[:, :2]) / 2
-    wh = xy[:, 2:] - xy[:, :2]
-    return torch.cat([cxcy, wh], dim=1)
-
-
 def cxcy_to_gcxgcy(cxcy, priors_cxcy):
     return torch.cat([(cxcy[:, :2] - priors_cxcy[:, :2]) / (priors_cxcy[:, 2:] / 10),
                       torch.log(cxcy[:, 2:] / priors_cxcy[:, 2:]) * 5], 1)
@@ -44,8 +38,9 @@ def gcxgcy_to_cxcy(gcxgcy, priors_cxcy):
 
 
 class MultiBoxLoss(nn.Module):
-    def __init__(self, priors, threshold=0.5, neg_pos_ratio=3, alpha=1.):
+    def __init__(self, priors, device, threshold=0.5, neg_pos_ratio=3, alpha=1.):
         super(MultiBoxLoss, self).__init__()
+        self.device = device
         self.priors_cxcy = priors
         self.priors_xy = cxcy_to_xy(priors)
         self.threshold = threshold
@@ -62,14 +57,14 @@ class MultiBoxLoss(nn.Module):
 
         assert n_priors == predicted_locs.size(1) == predicted_scores.size(1)
 
-        true_locs = torch.zeros((batch_size, n_priors, 4), dtype=torch.float)  # (N, priors, 4)
-        true_classes = torch.zeros((batch_size, n_priors), dtype=torch.long)  # (N, priors)
+        true_locs = torch.zeros((batch_size, n_priors, 4), dtype=torch.float).to(self.device)  # (N, priors, 4)
+        true_classes = torch.zeros((batch_size, n_priors), dtype=torch.long).to(self.device)  # (N, priors)
 
         # For each image
         for i in range(batch_size):
             n_objects = boxes[i].size(0)
 
-            overlap = cal_IoU(cxcy_to_xy(boxes[i]), self.priors_xy)  # (n_objects, priors)
+            overlap = cal_IoU(boxes[i].to(self.device), self.priors_xy)  # (n_objects, priors)
 
             # For each prior, find the object that has the maximum overlap
             overlap_for_each_prior, object_for_each_prior = overlap.max(dim=0)  # (priors)
@@ -78,7 +73,7 @@ class MultiBoxLoss(nn.Module):
             _, prior_for_each_object = overlap.max(dim=1)  # (N_o)
 
             # Then, assign each object to the corresponding maximum-overlap-prior. (This fixes 1.)
-            object_for_each_prior[prior_for_each_object] = torch.LongTensor(range(n_objects))
+            object_for_each_prior[prior_for_each_object] = torch.LongTensor(range(n_objects)).to(self.device)
 
             # To ensure these priors qualify, artificially give them an overlap of greater than 0.5. (This fixes 2.)
             overlap_for_each_prior[prior_for_each_object] = 1.
@@ -91,7 +86,7 @@ class MultiBoxLoss(nn.Module):
             true_classes[i] = label_for_each_prior
 
             # Encode center-size object coordinates into the form we regressed predicted boxes to
-            true_locs[i] = cxcy_to_gcxgcy(boxes[i][object_for_each_prior], self.priors_cxcy)  # (priors, 4)
+            true_locs[i] = cxcy_to_gcxgcy(xy_to_cxcy(boxes[i])[object_for_each_prior].to(self.device), self.priors_cxcy)  # (priors, 4)
 
         # Identify priors that are positive (object/non-background)
         positive_priors = true_classes != 0  # (N, priors)
@@ -119,7 +114,7 @@ class MultiBoxLoss(nn.Module):
         conf_loss_neg = conf_loss_all.clone()  # (N, priors)
         conf_loss_neg[positive_priors] = 0.  # (N, priors), positive priors are ignored (never in top n_hard_negatives)
         conf_loss_neg, _ = conf_loss_neg.sort(dim=1, descending=True)  # (N, priors), sorted by decreasing hardness
-        hardness_ranks = torch.LongTensor(range(n_priors)).unsqueeze(0).expand_as(conf_loss_neg)  # (N, priors)
+        hardness_ranks = torch.LongTensor(range(n_priors)).unsqueeze(0).expand_as(conf_loss_neg).to(self.device)  # (N, priors)
         hard_negatives = hardness_ranks < n_hard_negatives.unsqueeze(1)  # (N, priors)
         conf_loss_hard_neg = conf_loss_neg[hard_negatives]  # (sum(n_hard_negatives))
 

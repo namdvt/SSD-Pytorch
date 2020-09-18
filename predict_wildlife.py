@@ -99,7 +99,7 @@ def detect_objects( model, predicted_locs, predicted_scores, min_score, max_over
     return all_images_boxes, all_images_labels, all_images_scores  # lists of length batch_size
 
 
-def detect( original_image, min_score, max_overlap, top_k, suppress=None ):
+def detect(original_image, min_score, max_overlap, top_k, suppress=None):
     # Transform
     image = F.resize(original_image, size=(300, 300))
     image = F.to_tensor(image)
@@ -136,15 +136,15 @@ def detect( original_image, min_score, max_overlap, top_k, suppress=None ):
         draw.rectangle(xy=box_location, outline=color, width=3)
 
         # write text
-        font = ImageFont.truetype("./calibril.ttf", 15)
+        font = ImageFont.truetype("Ubuntu-B.ttf", 15)
         text_size = font.getsize(labels[clazz][1].upper())
         text_location = [bbox[0] + 2., bbox[1] - text_size[1]]
-        textbox_location = [bbox[0], bbox[1] - text_size[1], bbox[0] + text_size[0] + 4., bbox[1]]
+        textbox_location = [bbox[0], bbox[1] - text_size[1], bbox[0] + text_size[0] + 12., bbox[1]]
 
         draw.rectangle(xy=textbox_location, fill=color)
         draw.text(xy=text_location, text=name.upper(), fill='white', font=font)
 
-        original_image.save("output/output4.jpg", "JPEG")
+        original_image.save("output/4.jpg", "JPEG")
 
 
 if __name__ == '__main__':
@@ -153,7 +153,11 @@ if __name__ == '__main__':
     model = model.to(device)
     model.eval()
 
-    img_path = 'data/4.jpg'
+    img_path = '/home/nam/Desktop/4.jpg'
     original_image = Image.open(img_path)
+
+    w = 800
+    h = int(w * original_image.height / original_image.width)
+    original_image = original_image.resize((w, h))
 
     detect(original_image, min_score=0.3, max_overlap=0.4, top_k=100)

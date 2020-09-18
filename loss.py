@@ -38,11 +38,11 @@ def gcxgcy_to_cxcy(gcxgcy, priors_cxcy):
 
 
 class MultiBoxLoss(nn.Module):
-    def __init__(self, priors, device, threshold=0.5, neg_pos_ratio=3, alpha=1.):
+    def __init__( self, priors_cxcy, device, threshold=0.5, neg_pos_ratio=3, alpha=1.):
         super(MultiBoxLoss, self).__init__()
         self.device = device
-        self.priors_cxcy = priors
-        self.priors_xy = cxcy_to_xy(priors)
+        self.priors_cxcy = priors_cxcy
+        self.priors_xy = cxcy_to_xy(priors_cxcy)
         self.threshold = threshold
         self.neg_pos_ratio = neg_pos_ratio
         self.alpha = alpha

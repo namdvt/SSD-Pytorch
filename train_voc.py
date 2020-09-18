@@ -2,11 +2,10 @@ import torch
 import torch.optim as optim
 from helper import write_log, write_figure
 import numpy as np
-from dataset_voc import get_loader
-from model import SSD
+from dataloader.dataset_voc import get_loader
 from tqdm import tqdm
 from loss import MultiBoxLoss
-import math
+from models.ssd_vgg import SSD_VGG
 
 
 def fit(epoch, model, optimizer, criterion, device, data_loader, phase='training'):
@@ -41,19 +40,18 @@ def fit(epoch, model, optimizer, criterion, device, data_loader, phase='training
 
 def train():
     print('start training ...........')
-    batch_size = 2
-    num_epochs = 200
-    learning_rate = 0.01
+    batch_size = 32
+    num_epochs = 600
+    lr = 0.001
 
     device = torch.device("cuda:0" if (torch.cuda.is_available()) else "cpu")
-    model = SSD(num_classes=21, device=device)
+    model = SSD_VGG(num_classes=21, device=device, freeze=False)
     # model.load_state_dict(torch.load('output/weight.pth', map_location=device))
+    train_loader, val_loader = get_loader(batch_size=batch_size)
 
-    train_loader, val_loader = get_loader('data/VOC2012', batch_size=batch_size)
-
-    optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, nesterov=True)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
-    criterion = MultiBoxLoss(priors=model.priors_cxcy, device=device)
+    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=0.0005)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=50)
+    criterion = MultiBoxLoss(priors_cxcy=model.priors_cxcy, device=device)
 
     train_losses, val_losses = [], []
     for epoch in range(num_epochs):

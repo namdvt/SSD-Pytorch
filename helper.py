@@ -1,26 +1,5 @@
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import torch
-
-# African_wildlife_labels = {0: 'background', 1: 'buffalo', 2: 'elephant', 3: 'rhino', 4: 'zebra'}
-#
-#
-# def show(image, labels, bboxes):
-#     bboxes = torch.tensor(bboxes) * torch.FloatTensor([image.width, image.height, image.width, image.height])
-#     plt.imshow(image)
-#     figure = plt.gca()
-#     for label, bbox in zip(labels, bboxes):
-#         rectangle = patches.Rectangle(xy=(bbox[0] - bbox[2]/2, bbox[1] - bbox[3]/2),
-#                                       width=bbox[2],
-#                                       height=bbox[3],
-#                                       linewidth=1, edgecolor='r', facecolor='none')
-#         figure.add_patch(rectangle)
-#         plt.text(bbox[0] - bbox[2] / 2, bbox[1] - bbox[3] / 2, African_wildlife_labels[label],
-#                  fontsize=9, bbox=dict(color='red', alpha=0, fill=True))
-#
-#     plt.savefig('result.png')
-#     plt.show()
-#     print()
 
 
 def show2(image, labels, bboxes):
@@ -28,13 +7,13 @@ def show2(image, labels, bboxes):
     plt.imshow(image.permute(1, 2, 0))
     figure = plt.gca()
     for label, bbox in zip(labels, bboxes):
-        rectangle = patches.Rectangle(xy=(bbox[0] - bbox[2]/2, bbox[1] - bbox[3]/2),
-                                      width=bbox[2],
-                                      height=bbox[3],
+        rectangle = patches.Rectangle(xy=(bbox[0], bbox[1]),
+                                      width=bbox[2] - bbox[0],
+                                      height=bbox[3] - bbox[1],
                                       linewidth=1, edgecolor='r', facecolor='none')
         figure.add_patch(rectangle)
-        plt.text(bbox[0] - bbox[2] / 2, bbox[1] - bbox[3] / 2, African_wildlife_labels[label.item()],
-                 fontsize=9, bbox=dict(color='red', alpha=0, fill=True))
+        # plt.text(bbox[0] - bbox[2] / 2, bbox[1] - bbox[3] / 2, African_wildlife_labels[label.item()],
+        #          fontsize=9, bbox=dict(color='red', alpha=0, fill=True))
 
     plt.show()
     print()
